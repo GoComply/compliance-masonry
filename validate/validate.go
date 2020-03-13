@@ -3,7 +3,9 @@ package validate
 import (
 	"fmt"
 	"github.com/opencontrol/compliance-masonry/pkg/lib"
+	"github.com/opencontrol/compliance-masonry/pkg/lib/certifications"
 	"github.com/opencontrol/compliance-masonry/pkg/lib/common"
+	"io/ioutil"
 	"os"
 )
 
@@ -18,10 +20,42 @@ func Validate() {
 	for _, component := range workspace.GetAllComponents() {
 		problems = append(problems, validateComponent(workspace, component)...)
 	}
+
+	certs, err := ioutil.ReadDir("opencontrols/certifications")
+	if err != nil {
+		fmt.Println(err)
+	}
+	for _, cert := range certs {
+		certification, err := certifications.Load("opencontrols/certifications/" + cert.Name())
+		if err != nil {
+			fmt.Println(err)
+		}
+		problems = append(problems, validateCertification(workspace, certification)...)
+	}
+
 	for _, problem := range problems {
 		fmt.Println(problem)
 	}
 	os.Exit(len(problems))
+}
+
+func validateCertification(ws common.Workspace, cert common.Certification) []string {
+	problems := make([]string, 0)
+	for _, standardKey := range cert.GetSortedStandards() {
+		standard, found := ws.GetStandard(standardKey)
+		if !found {
+			problems = append(problems, fmt.Sprintf("Certification %s references standard %s that is missing in the repo.", cert.GetKey(), standardKey))
+			continue
+		}
+		validControls := standard.GetControls()
+		for _, controlKey := range cert.GetControlKeysFor(standardKey) {
+			_, found = validControls[controlKey]
+			if !found {
+				problems = append(problems, fmt.Sprintf("Certification %s references control %s in standard %s that is not defined in the repo.", cert.GetKey(), controlKey, standardKey))
+			}
+		}
+	}
+	return problems
 }
 
 func validateComponent(workspace common.Workspace, component common.Component) []string {
